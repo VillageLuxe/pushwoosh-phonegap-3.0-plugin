@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <plugin xmlns="http://apache.org/cordova/ns/plugins/1.0" xmlns:android="http://schemas.android.com/apk/res/android"
     id="com.pushwoosh.plugins.pushwoosh"
-    version="3.3.0">
+    version="3.4.0">
 
     <name>Pushwoosh</name>
 
@@ -124,6 +124,7 @@
     <platform name="ios">
       <framework src="Security.framework" />
       <framework src="Storekit.framework" />
+      <framework src="CoreLocation.framework" />
       <config-file target="config.xml" parent="/*">
         <feature name="PushNotification">
           <param name="ios-package" value="PushNotification"/>

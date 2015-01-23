@@ -10,6 +10,7 @@
 
 package com.pushwoosh.plugin.pushnotifications;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
@@ -24,7 +25,9 @@ import android.util.Log;
 
 import com.arellomobile.android.push.BasePushMessageReceiver;
 import com.arellomobile.android.push.PushManager;
+import com.arellomobile.android.push.PushPersistance;
 import com.arellomobile.android.push.PushManager.GetTagsListener;
+import com.arellomobile.android.push.SendPushTagsCallBack;
 import com.arellomobile.android.push.preference.SoundType;
 import com.arellomobile.android.push.preference.VibrateType;
 import com.arellomobile.android.push.utils.RegisterBroadcastReceiver;
@@ -57,6 +60,7 @@ public class PushNotifications extends CordovaPlugin
 	public static final String GET_HWID = "getPushwooshHWID";
 
 	boolean receiversRegistered = false;
+	boolean deviceReady = false;
 
 	HashMap<String, CallbackContext> callbackIds = new HashMap<String, CallbackContext>();
 	PushManager mPushManager = null;
@@ -319,24 +323,38 @@ public class PushNotifications extends CordovaPlugin
 			}
 		}
 
-		try
-		{
-			Map<String, String> skippedTags = PushManager.sendTagsFromBG(cordova.getActivity(), paramsMap);
+		callbackIds.put("setTags", callbackContext);
 
-			JSONObject skippedTagsObj = new JSONObject();
-			for (String tagName : skippedTags.keySet())
+		final class SendTagsListenerImpl implements SendPushTagsCallBack
+		{
+			@Override
+			public void onSentTagsSuccess(Map<String, String> skippedTags)
 			{
-				skippedTags.put(tagName, skippedTags.get(tagName));
+				CallbackContext callback = callbackIds.get("setTags");
+				if (callback == null)
+					return;
+
+				callback.success(new JSONObject(skippedTags));
+				callbackIds.remove("setTags");
 			}
 
-			callbackContext.success(skippedTagsObj);
-			return true;
+			@Override
+			public void onSentTagsError(Exception e)
+			{
+				CallbackContext callback = callbackIds.get("setTags");
+				if (callback == null)
+					return;
+
+				callback.error(e.getMessage());
+				callbackIds.remove("setTags");
+			}
+
+			@Override
+			public void taskStarted() {}
 		}
-		catch (Exception e)
-		{
-			e.printStackTrace();
-			return false;
-		}
+		
+		PushManager.sendTags(cordova.getActivity(), paramsMap, new SendTagsListenerImpl());
+		return true;
 	}
 
 	@Override
@@ -363,6 +381,7 @@ public class PushNotifications extends CordovaPlugin
 		{
 			initialize(data, callbackId);
 			checkMessage(cordova.getActivity().getIntent());
+			deviceReady = true;
 			return true;
 		}
 
@@ -637,6 +656,25 @@ public class PushNotifications extends CordovaPlugin
 			}
 
 			PushManager.getTagsAsync(cordova.getActivity(), new GetTagsListenerImpl());
+			return true;
+		}
+		
+		if(action.equals("getPushHistory"))
+		{
+			ArrayList<String> pushHistory = PushPersistance.getPushHistory(cordova.getActivity());
+			callbackId.success(new JSONArray(pushHistory));
+			return true;
+		}
+
+		if(action.equals("clearPushHistory"))
+		{
+			PushPersistance.clearPushHistory(cordova.getActivity());
+			return true;
+		}
+
+		if(action.equals("clearNotificationCenter"))
+		{
+			PushManager.clearNotificationCenter(cordova.getActivity());
 			return true;
 		}
 

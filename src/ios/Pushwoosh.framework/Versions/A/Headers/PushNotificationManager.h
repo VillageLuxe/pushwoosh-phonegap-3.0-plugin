@@ -18,8 +18,8 @@ typedef NS_ENUM(NSInteger, PWSupportedOrientations) {
 	PWOrientationLandscapeRight = 1 << 3,
 };
 
-typedef void(^pushwooshGetTagsHandler)(NSDictionary *tags);
-typedef void(^pushwooshErrorHandler)(NSError *error);
+typedef void(^PushwooshGetTagsHandler)(NSDictionary *tags);
+typedef void(^PushwooshErrorHandler)(NSError *error);
 
 /**
  `PushNotificationDelegate` protocol defines the methods that can be implemented in the delegate of the `PushNotificationManager` class' singleton object.
@@ -96,6 +96,18 @@ typedef void(^pushwooshErrorHandler)(NSError *error);
 - (void) onPushAccepted:(PushNotificationManager *)pushManager withNotification:(NSDictionary *)pushNotification onStart:(BOOL)onStart;
 
 /**
+ User has tapped on the action button on Rich Push Page.
+ 
+ @param customData Data associated with rich page button in the Rich Push Editor
+ */
+- (void) onRichPageButtonTapped:(NSString *)customData;
+
+/**
+ User has tapped on the back button on Rich Push Page.
+ */
+- (void) onRichPageBackTapped;
+
+/**
  Tells the delegate that the push manager has received tags from the server.
  
  @param tags Dictionary representation of received tags.
@@ -152,9 +164,6 @@ typedef void(^pushwooshErrorHandler)(NSError *error);
 	NSString *appCode;
 	NSString *appName;
 
-	UIWindow *richPushWindow;
-	NSInteger internalIndex;
-	NSMutableDictionary *pushNotifications;
 	NSObject<PushNotificationDelegate> *__unsafe_unretained delegate;
 }
 
@@ -192,14 +201,15 @@ typedef void(^pushwooshErrorHandler)(NSError *error);
  */
 @property (nonatomic, assign) NSObject<PushNotificationDelegate> *delegate;
 
-@property (nonatomic, retain) UIWindow *richPushWindow;
-@property (nonatomic, retain) NSDictionary *pushNotifications;
-@property (nonatomic, assign) PWSupportedOrientations supportedOrientations;
-
 /**
  Show push notifications alert when push notification is received while the app is running, default is `YES`
  */
 @property (nonatomic, assign) BOOL showPushnotificationAlert;
+
+/**
+ Returns push notification payload if the app was started in response to push notification or null otherwise
+ */
+@property (nonatomic, copy, readonly) NSDictionary *launchNotification;
 
 /**
  Initializes PushNotificationManager. Usually called by Pushwoosh Runtime internally.
@@ -226,11 +236,8 @@ typedef void(^pushwooshErrorHandler)(NSError *error);
  */
 - (void) unregisterForPushNotifications;
 
-+ (BOOL) getAPSProductionStatus;
-
 - (id) initWithApplicationCode:(NSString *)appCode appName:(NSString *)appName;
 - (id) initWithApplicationCode:(NSString *)appCode navController:(UIViewController *) navController appName:(NSString *)appName __attribute__((deprecated));
-- (void) showWebView;
 
 /**
  Start location tracking.
@@ -271,6 +278,11 @@ typedef void(^pushwooshErrorHandler)(NSError *error);
 - (void) setTags: (NSDictionary *) tags;
 
 /**
+ Send tags to server with completion block. If setTags succeeds competion is called with nil argument. If setTags fails completion is called with error.
+ */
+- (void) setTags: (NSDictionary *) tags withCompletion: (void(^)(NSError* error)) completion;
+
+/**
  Get tags from the server. Calls delegate method `onTagsReceived:` or `onTagsFailedToReceive:` depending on the results.
  */
 - (void) loadTags;
@@ -288,7 +300,7 @@ typedef void(^pushwooshErrorHandler)(NSError *error);
  
  @param errorHandler The block is executed on the unsuccessful completion of the request. This block has no return value and takes one argument: the error that occurred during the request.
  */
-- (void) loadTags: (pushwooshGetTagsHandler) successHandler error:(pushwooshErrorHandler) errorHandler;
+- (void) loadTags: (PushwooshGetTagsHandler) successHandler error:(PushwooshErrorHandler) errorHandler;
 
 /**
  Informs the Pushwoosh about the app being launched. Usually called internally by SDK Runtime.
@@ -311,28 +323,27 @@ typedef void(^pushwooshErrorHandler)(NSError *error);
 - (void) sendLocation: (CLLocation *) location;
 
 /**
- Records stats for a goal in the application, like in-app purchase, user reaching a specific point at the game etc. This function could be used to see the performance of marketing push notification.
+ Sends in-app purchases to Pushwoosh. Use in paymentQueue:updatedTransactions: payment queue method (see example).
  
  Example:
  
-	[[PushNotificationManager pushManager] recordGoal:@"purchase1"];
+	 - (void)paymentQueue:(SKPaymentQueue *)queue updatedTransactions:(NSArray *)transactions {
+		[[PushNotificationManager pushManager] sendSKPaymentTransactions:transactions];
+	 }
  
- @param goal Goal string.
+ @param transactions Array of SKPaymentTransaction items as received in the payment queue.
  */
-- (void) recordGoal: (NSString *) goal;
+- (void) sendSKPaymentTransactions:(NSArray *)transactions;
 
 /**
- Records stats for a goal in the application, like in-app purchase, user reaching a specific point at the game.
- Additional count parameter is responsible for storing the additional information about the goal achieved like price of the purchase e.t.c.
+ Tracks individual in-app purchase. See recommended `sendSKPaymentTransactions:` method.
  
- Example:
- 
-	[[PushNotificationsManager pushManager] recordGoal:@"purchase" withCount:[NSNumber numberWithInt:"10"];
-  
- @param goal Goal string.
- @param count Count parameter. Must be integer value.
+ @param productIdentifier purchased product ID
+ @param price price for the product
+ @param currencyCode currency of the price (ex: @"USD")
+ @param date time of the purchase (ex: [NSDate now])
  */
-- (void) recordGoal: (NSString *) goal withCount: (NSNumber *) count;
+- (void) sendPurchase: (NSString *) productIdentifier withPrice:(NSDecimalNumber *)price currencyCode:(NSString *)currencyCode andDate:(NSDate *)date;
 
 /**
  Gets current push token.
@@ -391,7 +402,7 @@ typedef void(^pushwooshErrorHandler)(NSError *error);
 - (NSDictionary *) getApnPayload:(NSDictionary *)pushNotification;
 
 /**
- Gets custom JSON data from push notifications dictionary as specified in Pushwoosh Control Panel.
+ Gets custom JSON string data from push notifications dictionary as specified in Pushwoosh Control Panel.
  
  Example:
  
@@ -405,8 +416,64 @@ typedef void(^pushwooshErrorHandler)(NSError *error);
 - (NSString *) getCustomPushData:(NSDictionary *)pushNotification;
 
 /**
+ The same as getCustomPushData but returns NSDictionary rather than JSON string (converts JSON string into NSDictionary).
+ */
+- (NSDictionary *) getCustomPushDataAsNSDict:(NSDictionary *)pushNotification;
+
+/**
+ Returns dictionary with enabled remove notificaton types.
+ Example enabled push:
+ {
+	enabled = 1;
+	pushAlert = 1;
+	pushBadge = 1;
+	pushSound = 1;
+	type = 7;
+ }
+ 
+ where "type" field is UIUserNotificationType
+ 
+ Disabled push:
+ {
+	enabled = 1;
+	pushAlert = 0;
+	pushBadge = 0;
+	pushSound = 0;
+	type = 0;
+ }
+ 
+ Note: In the latter example "enabled" field means that device can receive push notification but could not display alerts (ex: silent push)
+ */
++ (NSMutableDictionary *)getRemoteNotificationStatus;
+
+/**
  Clears the notifications from the notification center.
  */
 + (void) clearNotificationCenter;
+
+/**
+ Set User indentifier. This could be Facebook ID, username or email, or any other user ID.
+ This allows data and events to be matched across multiple user devices.
+ */
+- (void) setUserId: (NSString*) userId; 
+
+/**
+ Post events for In-App Messages. This can trigger In-App message display as specified in Pushwoosh Control Panel.
+ 
+ Example:
+ 
+	 [[PushNotificationManager pushManager] setUserId:@"96da2f590cd7246bbde0051047b0d6f7"];
+	 [[PushNotificationManager pushManager] postEvent:@"buttonPressed" withAttributes:@{ @"buttonNumber" : @"4", @"buttonLabel" : @"Banner" } completion:nil];
+
+ @param event name of the event
+ @param attributes NSDictionary of event attributes
+ @param completion function to call after posting event
+ */
+- (void) postEvent: (NSString*) event withAttributes: (NSDictionary*) attributes completion: (void(^)(NSError* error)) completion;
+
+/**
+ See `postEvent:withAttributes:completion:`
+ */
+- (void) postEvent: (NSString*) event withAttributes: (NSDictionary*) attributes;
 
 @end
